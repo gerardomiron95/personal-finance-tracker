@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Personal Finance Tracker</title>
+
+  <!-- Content Security Policy for Plaid + reCAPTCHA -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' https://cdn.plaid.com https://www.google.com https://www.gstatic.com 'unsafe-inline';
+    connect-src 'self' https://sandbox.plaid.com https://development.plaid.com https://production.plaid.com https://www.google.com https://www.gstatic.com;
+    frame-src https://*.plaid.com https://www.google.com/recaptcha/;
+    style-src 'self' 'unsafe-inline';
+  ">
+
+  <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+  <style>
+    body { font-family: system-ui; text-align: center; padding: 2rem; background: #f9fafb; }
+    button { padding: 0.75rem 1.5rem; font-size: 1rem; background: #2563eb; color: white; border: none; border-radius: 0.5rem; cursor: pointer; }
+    button:hover { background: #1e40af; }
+    pre { text-align: left; background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h2>Connect your Bank Account</h2>
+  <button id="link-button">Link Bank Account</button>
+
+  <h3>Transactions</h3>
+  <pre id="transactions">No transactions loaded yet.</pre>
+
+  <script>
+    async function parseJSON(response) {
+      const text = await response.text();
+      try { return JSON.parse(text); }
+      catch { console.error("Raw response:", text); throw new Error("Invalid JSON"); }
+    }
+
+    async function createLinkToken() {
+      const res = await fetch("/api/create_link_token", { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await parseJSON(res);
+      return data.link_token;
+    }
+
+    async function exchangePublicToken(token) {
+      const res = await fetch("/api/exchange_public_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ public_token: token })
+      });
+      if (!res.ok) throw new Error(await res.text());
+    }
+
+    async function loadTransactions() {
+      try {
+        const res = await fetch("/api/sync_transactions");
+        const data = await parseJSON(res);
+
+        if (data.error === "PRODUCT_NOT_READY") {
+          document.getElementById("transactions").textContent = "Transactions not ready yet, retrying...";
+          setTimeout(loadTransactions, 5000);
+          return;
+        }
+
+        document.getElementById("transactions").textContent = JSON.stringify(data.transactions, null, 2);
+      } catch (err) {
+        console.error(err);
+        document.getElementById("transactions").textContent = "Error loading transactions.";
+      }
+    }
+
+    async function initPlaid() {
+      try {
+        const token = await createLinkToken();
+        const handler = Plaid.create({
+          token: token,
+          onSuccess: async (public_token) => { 
+            await exchangePublicToken(public_token); 
+            loadTransactions(); 
+          },
+          onExit: (err) => { 
+            if(err) console.error("Plaid exit:", err); 
+          }
+        });
+        document.getElementById("link-button").onclick = () => handler.open();
+      } catch (err) {
+        console.error(err);
+        alert("Error initializing Plaid Link.");
+      }
+    }
+
+    initPlaid();
+  </script>
+</body>
+</html>

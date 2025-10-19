@@ -1,0 +1,4 @@
+flask
+plaid-python>=20.0.0
+python-dotenv
+requests
