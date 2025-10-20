@@ -13,6 +13,7 @@ from plaid.model.country_code import CountryCode
 from plaid.model.products import Products
 
 load_dotenv()
+
 app = Flask(__name__)
 
 # -----------------------
@@ -29,6 +30,7 @@ db_config = {
 # Database helper functions
 # -----------------------
 def save_access_token(institution_id, token):
+    """Insert or update an access token for an institution"""
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
@@ -43,6 +45,7 @@ def save_access_token(institution_id, token):
         conn.close()
 
 def save_transactions(transactions, institution_id):
+    """Insert transactions, ignore duplicates"""
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
@@ -61,6 +64,20 @@ def save_transactions(transactions, institution_id):
                 institution_id
             ))
         conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+def get_last_transaction_date(institution_id):
+    """Return the date of the latest transaction we have for a given institution"""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT MAX(date) FROM transactions WHERE institution_id=%s
+        """, (institution_id,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] else None
     finally:
         cursor.close()
         conn.close()
@@ -93,9 +110,9 @@ def create_link_token():
 def exchange_public_token():
     try:
         public_token = request.json.get("public_token")
-        metadata = request.json.get("metadata")  # receive metadata from front end
+        metadata = request.json.get("metadata")
 
-        # fallback institution_id
+        # fallback if metadata missing
         if metadata and "institution" in metadata and "institution_id" in metadata["institution"]:
             institution_id = metadata["institution"]["institution_id"]
         else:
@@ -106,7 +123,6 @@ def exchange_public_token():
         )
         access_token = resp.to_dict()["access_token"]
 
-        # Save access token in DB
         save_access_token(institution_id, access_token)
         return jsonify({"status": "success"})
     except Exception as e:
@@ -115,8 +131,8 @@ def exchange_public_token():
 
 @app.route("/api/sync_transactions", methods=["GET"])
 def sync_transactions():
+    """Fetch transactions for all institutions, only new transactions"""
     try:
-        # Fetch all access tokens from DB
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
         cursor.execute("SELECT access_token, institution_id FROM access_tokens")
@@ -132,8 +148,10 @@ def sync_transactions():
 
     for access_token, institution_id in tokens:
         try:
-            start_date = (datetime.now() - timedelta(days=365*2)).date()
+            last_date = get_last_transaction_date(institution_id)
+            start_date = (last_date + timedelta(days=1)) if last_date else (datetime.now() - timedelta(days=365*2)).date()
             end_date = datetime.now().date()
+
             req = TransactionsGetRequest(
                 access_token=access_token,
                 start_date=start_date,

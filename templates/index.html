@@ -16,7 +16,7 @@
   <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <style>
     body { font-family: system-ui; text-align: center; padding: 2rem; background: #f9fafb; }
-    button { padding: 0.75rem 1.5rem; font-size: 1rem; background: #2563eb; color: white; border: none; border-radius: 0.5rem; cursor: pointer; }
+    button { padding: 0.75rem 1.5rem; font-size: 1rem; background: #2563eb; color: white; border: none; border-radius: 0.5rem; cursor: pointer; margin: 0.5rem; }
     button:hover { background: #1e40af; }
     pre { text-align: left; background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-top: 1rem; }
   </style>
@@ -24,6 +24,7 @@
 <body>
   <h2>Connect your Bank Account</h2>
   <button id="link-button">Link Bank Account</button>
+  <button id="load-transactions-button">Load Transactions</button>
 
   <h3>Transactions</h3>
   <pre id="transactions">No transactions loaded yet.</pre>
@@ -42,11 +43,11 @@
       return data.link_token;
     }
 
-    async function exchangePublicToken(token) {
+    async function exchangePublicToken(token, metadata) {
       const res = await fetch("/api/exchange_public_token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ public_token: token })
+        body: JSON.stringify({ public_token: token, metadata: metadata })
       });
       if (!res.ok) throw new Error(await res.text());
     }
@@ -74,8 +75,8 @@
         const token = await createLinkToken();
         const handler = Plaid.create({
           token: token,
-          onSuccess: async (public_token) => { 
-            await exchangePublicToken(public_token); 
+          onSuccess: async (public_token, metadata) => { 
+            await exchangePublicToken(public_token, metadata); 
             loadTransactions(); 
           },
           onExit: (err) => { 
@@ -89,7 +90,11 @@
       }
     }
 
+    // Initialize Plaid Link on page load
     initPlaid();
+
+    // Assign Load Transactions button
+    document.getElementById("load-transactions-button").onclick = loadTransactions;
   </script>
 </body>
 </html>
